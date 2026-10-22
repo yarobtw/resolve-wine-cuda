@@ -96,7 +96,7 @@ guid_re='\{[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-
 detect_guid_registry() {
     local base='HKLM\System\CurrentControlSet\Control\Video' list g i
     "$WINESERVER" -p
-    WINEDEBUG=-all "$WINE" notepad >/dev/null 2>&1 &
+    WINEDEBUG=-all "$WINE" start /min notepad >/dev/null 2>&1 &
     for i in $(seq 1 30); do
         list=$(WINEDEBUG=-all "$WINE" reg query "$base" 2>/dev/null | tr -d '\r' | grep -oE "$guid_re" | sort -u || true)
         [[ -n "$list" ]] && break
@@ -242,7 +242,16 @@ EOF
 cmd_launch() {
     in_sandbox || reexec_in_sandbox launch
     load_conf
-    : "${ADAPTER_GUID:?ADAPTER_GUID missing in $CONF — run detect-guid}"
+    if [[ -z "${ADAPTER_GUID:-}" ]]; then
+        msg "Adapter GUID not in config yet — detecting it now"
+        "$WINESERVER" -k 2>/dev/null || true
+        ADAPTER_GUID=$(detect_guid_registry || true)
+        "$WINESERVER" -k 2>/dev/null || true
+        [[ "$ADAPTER_GUID" =~ ^\{[0-9a-fA-F-]{36}\}$ ]] \
+            || die "Could not detect the adapter GUID. Run '$INSTALL_PATH detect-guid' and report its output."
+        printf 'ADAPTER_GUID=%q\n' "$ADAPTER_GUID" >>"$CONF"
+        msg "Adapter GUID: $ADAPTER_GUID (saved)"
+    fi
     local base="HKLM\\System\\CurrentControlSet\\Control\\Video\\$ADAPTER_GUID"
     "$WINESERVER" -p
     # Wine recreates these keys on every start, so they are written per launch.

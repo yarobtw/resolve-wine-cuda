@@ -4,7 +4,17 @@
 
 [English version](README.md)
 
-> **Статус: експериментальний.** Перевірено на одному комп'ютері (див. нижче): Resolve запускається, працює на CUDA, у ньому змонтовано простий проєкт. Рендер, тривалу роботу і сторонні OFX-плагіни ще треба ширше тестувати, тож звіти вітаються.
+> **Статус: експериментальний.** Перевірено на одному комп'ютері (див. нижче): Resolve запускається, працює на CUDA, у ньому змонтовано й відрендерено в H.264 простий проєкт (Studio). Тривалу роботу і сторонні OFX-плагіни ще треба ширше тестувати, тож звіти вітаються.
+
+![DaVinci Resolve Studio running on Linux with CUDA](docs/screenshot.png)
+
+```
+GPUDetect          | NVIDIA GPU Driver: 581.57, supports CUDA 13.0
+GPUDetect          | Matches: CUDA, DirectX, NVAPI, NVML, OpenCL
+Main.GPUConfig     | Selected compute API: CUDA
+GPU.MultiBoardMgr  | Let There Be CUDA Light!
+GPU.SingleBoardMgr | Board manager thread for "NVIDIA GeForce GTX 1060" is ready.
+```
 
 ## Перевірена конфігурація
 
@@ -16,7 +26,7 @@
 | Bottles | Flatpak |
 | Раннер | soda-11.0-10 |
 | Шар CUDA | [SveSop/nvidia-libs](https://github.com/SveSop/nvidia-libs) v1.0.2 |
-| Resolve | Studio 21.1.1 (Windows) |
+| Resolve | Studio 21.1.1 (Windows); `setup` також перевірено на чистій пляшці з безкоштовною версією |
 
 ## Чому зазвичай не працює
 
@@ -83,7 +93,9 @@ cd resolve-wine-cuda
 7. один раз запускає Resolve у фоні, щоб визначити GUID адаптера, і закриває його;
 8. записує `~/.var/app/com.usebottles.bottles/data/resolve-wine.conf` і додає в меню пункт **DaVinci Resolve (Wine)**.
 
-Далі запускайте з меню або:
+Потім у Bottles відкрийте пляшку → **Settings → Components** і переконайтеся, що встановлено **DXVK**, а **DXVK-NVAPI** = `dxvk-nvapi-v0.9.1`; у **Graphics** увімкніть **DXVK-NVAPI** (і **Discrete Graphics** на ноутбуках з двома GPU). У щойно створеній пляшці цього може не бути.
+
+Запускайте з меню або:
 
 ```bash
 ~/.var/app/com.usebottles.bottles/data/resolve-wine.sh launch
@@ -139,6 +151,9 @@ Debian 13 постачає 550 (CUDA 12.4), а репозиторій NVIDIA д�
 | У лозі Wine: `unimplemented function ucrtbase.dll.cabsf` | Немає справжнього ucrtbase (`winetricks ucrtbase2019`) |
 | Випадковий виліт після модулів Fusion, `c0000005` у `pthreadVC2.dll` | pthreadVC2 не виправлений |
 | Зависає на «Loading Project Libraries» | Запущено кілька копій Resolve: `flatpak kill com.usebottles.bottles` і запустіть одну |
+| Resolve не стартує, у лозі Wine: `nvcuda.dll (which is needed by ggml-cuda.dll) not found`, статус `c0000135` | Bottles записав `"nvcuda"="disabled"` (робить це, коли вмикаєте DXVK-NVAPI). `launch` це перекриває, кнопка Bottles — ні |
+| Біле вікно при першому запуску (`DaVinci Resolve Welcome.exe`) | Вітальний тур під Wine малюється повільно або білим: зачекайте або закрийте, він показується лише раз |
+| Безкоштовна версія: немає H.264/H.265 у Deliver | Безкоштовна Windows-збірка кодує через Media Foundation, якого у Wine немає. Studio кодує через NVENC |
 
 Як самому знайти причину вильоту: запустіть з `WINEDEBUG=-all,err+all,+seh,+loaddll`, візьміть `addr=` винятку `c0000005` і знайдіть модуль, у якого адреса `Loaded … at` найближча знизу.
 

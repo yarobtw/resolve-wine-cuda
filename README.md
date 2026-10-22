@@ -4,7 +4,17 @@ Run the **Windows build** of DaVinci Resolve Studio on Linux through Wine (Bottl
 
 [Українська версія](README.uk.md)
 
-> **Status: experimental.** Verified on one machine (see below): Resolve starts, runs on CUDA, and a simple project was edited. Rendering, long sessions and third‑party OFX plugins still need wider testing — reports are welcome.
+> **Status: experimental.** Verified on one machine (see below): Resolve starts, runs on CUDA, a simple project was edited and rendered to H.264 (Studio). Long sessions and third‑party OFX plugins still need wider testing — reports are welcome.
+
+![DaVinci Resolve Studio running on Linux with CUDA](docs/screenshot.png)
+
+```
+GPUDetect          | NVIDIA GPU Driver: 581.57, supports CUDA 13.0
+GPUDetect          | Matches: CUDA, DirectX, NVAPI, NVML, OpenCL
+Main.GPUConfig     | Selected compute API: CUDA
+GPU.MultiBoardMgr  | Let There Be CUDA Light!
+GPU.SingleBoardMgr | Board manager thread for "NVIDIA GeForce GTX 1060" is ready.
+```
 
 ## Tested configuration
 
@@ -16,7 +26,7 @@ Run the **Windows build** of DaVinci Resolve Studio on Linux through Wine (Bottl
 | Bottles | Flatpak |
 | Runner | soda‑11.0‑10 |
 | CUDA layer | [SveSop/nvidia-libs](https://github.com/SveSop/nvidia-libs) v1.0.2 |
-| Resolve | Studio 21.1.1 (Windows) |
+| Resolve | Studio 21.1.1 (Windows); `setup` also verified on a fresh bottle with the free version |
 
 ## Why it normally fails
 
@@ -83,7 +93,9 @@ cd resolve-wine-cuda
 7. starts Resolve once in the background to detect the adapter GUID, then closes it;
 8. writes `~/.var/app/com.usebottles.bottles/data/resolve-wine.conf` and adds **DaVinci Resolve (Wine)** to the application menu.
 
-Then launch from the menu or:
+Then, in Bottles, open the bottle → **Settings → Components** and make sure **DXVK** is installed and **DXVK-NVAPI** is set to `dxvk-nvapi-v0.9.1`; under **Graphics** enable **DXVK-NVAPI** (and **Discrete Graphics** on hybrid laptops). A freshly created bottle may have none of these.
+
+Launch from the menu or:
 
 ```bash
 ~/.var/app/com.usebottles.bottles/data/resolve-wine.sh launch
@@ -165,6 +177,9 @@ If the desktop does not come up: in GRUB press `e`, append `systemd.unit=multi-u
 | Wine log: `unimplemented function ucrtbase.dll.cabsf` | Native ucrtbase missing (`winetricks ucrtbase2019`) |
 | Random crash after Fusion modules, `c0000005` in `pthreadVC2.dll` | pthreadVC2 not patched |
 | Stuck on "Loading Project Libraries" | Several Resolve instances running — `flatpak kill com.usebottles.bottles`, start one |
+| Resolve does not start, Wine log: `nvcuda.dll (which is needed by ggml-cuda.dll) not found`, status `c0000135` | Bottles set `"nvcuda"="disabled"` (it does so when DXVK-NVAPI is enabled). `launch` overrides it; the Bottles button does not |
+| White window on the first start (`DaVinci Resolve Welcome.exe`) | The first-run tour renders slowly/white under Wine — wait or close it; it is shown only once |
+| Free version: no H.264/H.265 in Deliver | The free Windows build encodes through Media Foundation, which Wine lacks. Studio encodes via NVENC |
 
 To locate a crash yourself: run with `WINEDEBUG=-all,err+all,+seh,+loaddll`, take the `addr=` of the `c0000005` exception and find the module whose `Loaded … at` base is the closest one below it.
 
