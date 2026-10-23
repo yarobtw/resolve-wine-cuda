@@ -9,8 +9,7 @@
 ![DaVinci Resolve Studio running on Linux with CUDA](docs/screenshot.png)
 
 ```
-GPUDetect          | NVIDIA GPU Driver: 581.57, supports CUDA 13.0
-GPUDetect          | Matches: CUDA, DirectX, NVAPI, NVML, OpenCL
+GPUDetect          | NVIDIA GPU Driver: 580.99, supports CUDA 13.0
 Main.GPUConfig     | Selected compute API: CUDA
 GPU.MultiBoardMgr  | Let There Be CUDA Light!
 GPU.SingleBoardMgr | Board manager thread for "NVIDIA GeForce GTX 1060" is ready.
@@ -28,38 +27,36 @@ GPU.SingleBoardMgr | Board manager thread for "NVIDIA GeForce GTX 1060" is ready
 | Шар CUDA | [SveSop/nvidia-libs](https://github.com/SveSop/nvidia-libs) v1.0.2 |
 | Resolve | Studio 21.1.1 (Windows); `setup` також перевірено на чистій пляшці з безкоштовною версією |
 
+> **У Bottles 66.8+ є залежність CUDA.** Вона ставить у пляшку шар CUDA, тобто робить те саме, що тут nvidia-libs, — лише перший крок. Решта виправлень нижче однаково потрібна.
+
 ## Чому зазвичай не працює
 
-Додати CUDA у Wine — лише половина справи. Власний автодетект Resolve відкидає CUDA з чотирьох окремих причин, а після цього ще дві прогалини Wine призводять до вильоту. Кожну треба виправити:
+Додати CUDA у Wine — лише перший крок. Далі Resolve зупиняють ще п'ять речей:
 
-1. **Resolve кладе поруч із собою свій `nvcuda.dll`.** Windows шукає DLL спершу в папці програми, а потім у `system32`, тож Resolve завантажує цей Windows-файл драйвера замість Wine-реалізації з nvidia-libs. Під Wine той не знаходить драйвер, і в лозі з'являється `supports CUDA -1.-1`.
+1. **Resolve кладе поруч із собою свій `nvcuda.dll`.** Windows шукає DLL спершу в папці програми, а потім у `system32`, тож Resolve завантажує цей Windows-файл драйвера замість Wine-реалізації з nvidia-libs. Під Wine той не знаходить драйвер, у лозі з'являється `supports CUDA -1.-1`, і Resolve переходить на OpenCL, який під Wine не працює.
    **Рішення:** перейменувати `nvcuda.dll` у папці Resolve.
-2. **Скрипт nvidia-libs для Bottles не ставить NVML.** `GPUDetect` у Resolve користується NVML. Windows-половинка має лежати в `system32` пляшки, а Unix-половинка в `x86_64-unix` раннера.
-3. **Бракує записів реєстру відеоадаптера.** Resolve читає `ProviderName` з `HKLM\System\CurrentControlSet\Control\Video\{GUID}\0000` і `Driver` з `…\{GUID}\Video`. У Wine обидва поля порожні (`provider '' driver ''` у лозі). Wine створює ці ключі заново при кожному старті, тому вони записуються при кожному запуску. GUID на кожному комп'ютері свій.
-4. **Версія драйвера.** Resolve 21 вимагає CUDA 12.8 (Windows-версія перевіряє драйвер 581.57+).
-   - Драйвер на хості має давати CUDA ≥ 12.8, тобто **580+**. Для Pascal/Maxwell/Volta гілка 580 остання.
-   - Linux-драйвер 580.x для Windows-програм виглядає як 580.x, тому `DXVK_NVAPI_DRIVER_VERSION=58157` змушує dxvk-nvapi видавати 581.57.
-
-Коли ці чотири пункти виконано, у `ResolveDebug.txt` буде:
-
-```
-NVIDIA GPU Driver: 581.57, supports CUDA 13.0
-Matches: CUDA, DirectX, NVAPI, NVML, OpenCL
-Selected compute API: CUDA
-...
-Let There Be CUDA Light!
-Board manager thread for "NVIDIA GeForce GTX 1060" ... is ready.
-```
-
-Далі ще дві проблеми валять Resolve:
-
-5. **`unimplemented function ucrtbase.dll.cabsf`.** У вбудованій бібліотеці UCRT від Wine немає функції `cabsf()` (модуль комплексного числа). **Рішення:** справжній `ucrtbase.dll` через `winetricks ucrtbase2019`. Пакет `vcredist2019` з Bottles **не допомагає**: на Windows 10 інсталятор Visual C++ ніколи не ставить UCRT.
-6. **Випадковий `c0000005` у `pthreadVC2.dll + 0x3cb3`** одразу після завантаження модулів Fusion (`info[1]=0x198`). Це `pthread_getw32threadid_np()` читає з нульового `pthread_t`: щойно запущений робочий потік питає свій Windows-номер раніше, ніж творець встигає записати його дескриптор. Це гонка потоків, яку виявляє інший порядок старту потоків у Wine. **Рішення:** виправлення цієї функції на 13 байт у бібліотеці pthreads-win32 (LGPL), яку постачає Resolve, щоб на нульовому дескрипторі вона повертала 0 замість падіння:
+2. **Bottles може вимкнути `nvcuda`.** Коли в Bottles вмикаєте DXVK-NVAPI, він записує в пляшку `"nvcuda"="disabled"`. Resolve 21 при старті підтягує ланцюжок `llama.dll → ggml.dll → ggml-cuda.dll → nvcuda.dll`, тож із вимкненим `nvcuda` він узагалі не запускається (`c0000135`).
+   **Рішення:** скрипт запуску задає `WINEDLLOVERRIDES="nvcuda=n"`, а ця змінна має пріоритет над реєстром.
+3. **Версія драйвера.** Resolve 21 вимагає CUDA 12.8, тобто драйвер на хості **580+**. Для Pascal/Maxwell/Volta гілка 580 остання (див. [драйвер 580 на Debian 13](#драйвер-580-на-debian-13--lmde-7-pascal)).
+4. **`unimplemented function ucrtbase.dll.cabsf`.** У вбудованій бібліотеці UCRT від Wine немає функції `cabsf()` (модуль комплексного числа), і Resolve падає.
+   **Рішення:** справжній `ucrtbase.dll` через `winetricks ucrtbase2019`. Пакет `vcredist2019` з Bottles **не допомагає**: на Windows 10 інсталятор Visual C++ ніколи не ставить UCRT.
+5. **Випадковий `c0000005` у `pthreadVC2.dll + 0x3cb3`** одразу після завантаження модулів Fusion (`info[1]=0x198`). Це `pthread_getw32threadid_np()` читає з нульового `pthread_t`: щойно запущений робочий потік питає свій Windows-номер раніше, ніж творець встигає записати його дескриптор. Це гонка потоків, яку виявляє інший порядок старту потоків у Wine.
+   **Рішення:** виправлення цієї функції на 13 байт у бібліотеці pthreads-win32 (LGPL), яку постачає Resolve, щоб на нульовому дескрипторі вона повертала 0 замість падіння:
    ```
    було:  mov rax,[rcx] ; mov eax,[rax+0x198] ; ret ; int3 ×6
    стало: mov rax,[rcx] ; test rax,rax ; je +7 ; mov eax,[rax+0x198] ; ret ; ret
    ```
    Скрипт знаходить функцію за шаблоном байтів, виправляє вашу власну копію і зберігає `pthreadVC2.dll.orig`. Жоден бінарний файл тут не поширюється.
+
+### Перевірено й виявилось непотрібним
+
+Під час налагодження ще три речі здавались потрібними, але виявились зайвими (кожну прибирали й перевіряли окремо):
+
+- **NVML** (`nvml.dll`/`nvml.so` з nvidia-libs): Resolve бере з нього додаткову інформацію про відеокарту, але CUDA вибирає і без нього.
+- **Записи реєстру відеоадаптера** (`ProviderName`, `Video\Driver`): без них Resolve пише `Failed to find provider information … provider '' driver ''`, але все одно вибирає CUDA.
+- **Підміна версії драйвера** (`DXVK_NVAPI_DRIVER_VERSION`): зі справжнім драйвером 580 Resolve бачить `580.99` і приймає його. Знадобиться лише, якщо майбутня версія Resolve вимагатиме новіший драйвер, ніж у вас: тоді впишіть у конфіг `SPOOF_VERSION=58157` (= 581.57).
+
+Справжньою причиною `CUDA -1.-1` був лише вбудований `nvcuda.dll` (пункт 1).
 
 ## Що потрібно
 
@@ -85,13 +82,11 @@ cd resolve-wine-cuda
 `setup` запускається на хості і:
 
 1. перевіряє версію драйвера і відповідний Flatpak-runtime;
-2. запускає скрипт nvidia-libs для Bottles (на питання про експериментальний nvapi відповідайте **Y**, потім у Bottles виберіть `dxvk-nvapi-v0.9.1` в **Settings → Components → DXVK-NVAPI**);
-3. ставить NVML у пляшку й раннер;
-4. перейменовує `nvcuda.dll` Resolve на `nvcuda.dll.resolve-orig`;
-5. ставить справжній `ucrtbase` через winetricks (завантажується з офіційного репозиторію) всередині пісочниці Bottles;
-6. виправляє `pthreadVC2.dll` (оригінал зберігається як `.orig`);
-7. один раз запускає Resolve у фоні, щоб визначити GUID адаптера, і закриває його;
-8. записує `~/.var/app/com.usebottles.bottles/data/resolve-wine.conf` і додає в меню пункт **DaVinci Resolve (Wine)**.
+2. запускає скрипт nvidia-libs для Bottles (на питання про експериментальний nvapi відповідайте **Y**);
+3. перейменовує `nvcuda.dll` Resolve на `nvcuda.dll.resolve-orig`;
+4. ставить справжній `ucrtbase` через winetricks (завантажується з офіційного репозиторію) всередині пісочниці Bottles;
+5. виправляє `pthreadVC2.dll` (оригінал зберігається як `.orig`);
+6. записує `~/.var/app/com.usebottles.bottles/data/resolve-wine.conf` і додає в меню пункт **DaVinci Resolve (Wine)**.
 
 Потім у Bottles відкрийте пляшку → **Settings → Components** і переконайтеся, що встановлено **DXVK**, а **DXVK-NVAPI** = `dxvk-nvapi-v0.9.1`; у **Graphics** увімкніть **DXVK-NVAPI** (і **Discrete Graphics** на ноутбуках з двома GPU). У щойно створеній пляшці цього може не бути.
 
@@ -107,9 +102,28 @@ cd resolve-wine-cuda
 ~/.var/app/com.usebottles.bottles/data/resolve-wine.sh doctor
 ```
 
-> Запуск звичайною кнопкою в Bottles **не працюватиме**: вона не записує значення реєстру і не підміняє версію драйвера.
+> Запуск звичайною кнопкою в Bottles **не працюватиме**: вона не застосовує правила завантаження DLL.
 >
 > Запускайте **один** Resolve за раз: кілька копій в одній пляшці блокують базу проєктів і зависають на «Loading Project Libraries». Налагоджувальне логування (`WINEDEBUG=+seh` тощо) помітно гальмує Resolve, тому в скрипті запуску воно вимкнене.
+
+## Вручну, без скрипта
+
+<details>
+<summary>Ті самі кроки без скрипта</summary>
+
+1. Поставте nvidia-libs у пляшку їхнім `bottles_setup.sh <Пляшка>`.
+2. Перейменуйте `drive_c/Program Files/Blackmagic Design/DaVinci Resolve/nvcuda.dll`.
+3. `winetricks ucrtbase2019` у пляшці (з `WINE`/`WINESERVER`, що вказують на раннер).
+4. Виправте `pthreadVC2.dll` (шаблон байтів є в скрипті, функція `patch_pthread`).
+5. Запускайте в пісочниці (`flatpak run --command=bash com.usebottles.bottles`):
+
+```bash
+export WINEPREFIX=~/.var/app/com.usebottles.bottles/data/bottles/bottles/<Пляшка>
+RUNNER=~/.var/app/com.usebottles.bottles/data/bottles/runners/<раннер>/bin
+WINEDLLOVERRIDES="nvcuda,nvcuvid,nvencodeapi64,nvoptix=n;nvapi64,ucrtbase=n,b" DXVK_ENABLE_NVAPI=1 \
+  "$RUNNER/wine" "$WINEPREFIX/drive_c/Program Files/Blackmagic Design/DaVinci Resolve/Resolve.exe"
+```
+</details>
 
 ## Драйвер 580 на Debian 13 / LMDE 7 (Pascal)
 
@@ -129,39 +143,41 @@ Debian 13 постачає 550 (CUDA 12.4), а репозиторій NVIDIA д�
 
 Якщо робочий стіл не запускається: у GRUB натисніть `e`, допишіть `systemd.unit=multi-user.target` у кінець рядка `linux` (у той самий рядок), завантажтесь через **Ctrl+X** і виправте або відкотіть (`sudo nvidia-uninstall && sudo apt install nvidia-driver`).
 
+На Arch nvidia-libs є в AUR як пакет `wine-nvidia-libs-bin`.
+
 ## Як підтримувати в робочому стані
 
 | Ви оновили… | Тоді |
 |---|---|
-| Resolve | Повторіть `setup` (інсталятор може повернути `nvcuda.dll` і оригінальний `pthreadVC2.dll`); якщо новій версії потрібен новіший драйвер, збільште `SPOOF_VERSION` у конфігу |
-| Раннер | Змініть `RUNNER` у конфігу, повторіть `setup` |
+| Resolve | Повторіть `setup` (інсталятор може повернути `nvcuda.dll` і оригінальний `pthreadVC2.dll`) |
+| Раннер | Повторіть `setup` |
 | nvidia-libs | Повторіть `setup` |
 | Драйвер NVIDIA | Поставте Flatpak-runtime `GL`/`GL32` точно тієї самої версії |
 | Ядро | DKMS перезбере модуль; якщо ні: `sudo dkms autoinstall` |
 
 ## Проблеми
 
-| Симптом (у `ResolveDebug.txt`) | Причина |
+| Симптом | Причина |
 |---|---|
-| `supports CUDA -1.-1`, у `Matches` немає `CUDA` | `nvcuda.dll` поруч із `Resolve.exe` або немає NVML |
-| `provider '' driver ''` | Значення реєстру не записані: запускайте через скрипт |
+| `supports CUDA -1.-1`, у `Matches` немає `CUDA` | `nvcuda.dll` поруч із `Resolve.exe` |
+| Resolve не стартує, у лозі Wine: `nvcuda.dll (which is needed by ggml-cuda.dll) not found`, статус `c0000135` | Bottles записав `"nvcuda"="disabled"`. `launch` це перекриває, кнопка Bottles — ні |
 | `supports CUDA 12.4` (або < 12.8), але `Selected compute API: OpenCL` | Застарий драйвер на хості |
 | Зависає на «Loading Fairlight Engine» | Справа не в звуці: впала ініціалізація GPU через OpenCL, див. вище |
 | Bottles взагалі не бачить GPU | Версія Flatpak-runtime `GL.nvidia-*` ≠ драйвер хоста |
 | У лозі Wine: `unimplemented function ucrtbase.dll.cabsf` | Немає справжнього ucrtbase (`winetricks ucrtbase2019`) |
 | Випадковий виліт після модулів Fusion, `c0000005` у `pthreadVC2.dll` | pthreadVC2 не виправлений |
 | Зависає на «Loading Project Libraries» | Запущено кілька копій Resolve: `flatpak kill com.usebottles.bottles` і запустіть одну |
-| Resolve не стартує, у лозі Wine: `nvcuda.dll (which is needed by ggml-cuda.dll) not found`, статус `c0000135` | Bottles записав `"nvcuda"="disabled"` (робить це, коли вмикаєте DXVK-NVAPI). `launch` це перекриває, кнопка Bottles — ні |
+| `launch` одразу завершується, нічого не відкривається | Лишились процеси Wine: `flatpak kill com.usebottles.bottles` і запустіть знову |
 | Біле вікно при першому запуску (`DaVinci Resolve Welcome.exe`) | Вітальний тур під Wine малюється повільно або білим: зачекайте або закрийте, він показується лише раз |
 | Безкоштовна версія: немає H.264/H.265 у Deliver | Безкоштовна Windows-збірка кодує через Media Foundation, якого у Wine немає. Studio кодує через NVENC |
 
 Як самому знайти причину вильоту: запустіть з `WINEDEBUG=-all,err+all,+seh,+loaddll`, візьміть `addr=` винятку `c0000005` і знайдіть модуль, у якого адреса `Loaded … at` найближча знизу.
 
-`ResolveDebug.txt` лежить у `drive_c/users/<user>/AppData/Roaming/Blackmagic Design/DaVinci Resolve/Support/logs/`.
+Логи Resolve лежать у `drive_c/users/<user>/AppData/Roaming/Blackmagic Design/DaVinci Resolve/Support/logs/`. Після закриття Resolve лог переноситься в `LogArchive/ResolveDebug_1.txt` (найсвіжіший).
 
 ## Подяки
 
-- [SveSop/nvidia-libs](https://github.com/SveSop/nvidia-libs): nvcuda, NVML, dxvk-nvapi для Wine. Без цього нічого б не вийшло.
+- [SveSop/nvidia-libs](https://github.com/SveSop/nvidia-libs): nvcuda і dxvk-nvapi для Wine. Без цього нічого б не вийшло.
 - [Bottles](https://usebottles.com), Wine, dxvk-nvapi.
 
 ## Ліцензія
